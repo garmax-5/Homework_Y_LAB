@@ -26,4 +26,3 @@ public class User {
         return String.format("User{id='%s', name='%s', role=%s}", id, userName, role);
     }
 }
-

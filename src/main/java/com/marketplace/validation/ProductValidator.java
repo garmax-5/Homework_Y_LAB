@@ -3,7 +3,6 @@ package com.marketplace.validation;
 import com.marketplace.model.Product;
 import com.marketplace.service.AuditService;
 
-
 /**
  * Валидатор для объектов {@link Product}.
  * Проверяет корректность данных продукта перед сохранением или обновлением.

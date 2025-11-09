@@ -14,4 +14,3 @@ public interface ConsolePrinter {
     void printMessage(String message);
     void printMetrics(MetricsService metricsService);
 }
-

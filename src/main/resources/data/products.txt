@@ -1,0 +1,2 @@
+101,Phone,Apple,Electronics,999.99
+102,Laptop,Dell,Electronics,1299.99

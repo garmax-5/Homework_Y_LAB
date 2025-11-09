@@ -59,4 +59,3 @@ public class Product {
         return String.format("[%s] %s | %s | %s | %.2f", id, name, brand, category, price);
     }
 }
-

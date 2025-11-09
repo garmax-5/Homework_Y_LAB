@@ -10,7 +10,6 @@ public interface ProductRepository {
     Optional<Product> findById(long id);
     boolean deleteById(long id);
     List<Product> findAll();
-    //List<Product> search(ProductFilter filter);
     long count();
     boolean existsById(long id);
     List<Product> findByBrand(String brand);

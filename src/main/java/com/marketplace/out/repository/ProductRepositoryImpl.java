@@ -124,5 +124,4 @@ public class ProductRepositoryImpl implements ProductRepository {
             if (byCat.isEmpty()) productsByCategory.remove(catKey);
         }
     }
-
 }

@@ -31,4 +31,3 @@ public class AuditEvent {
                 timestamp, level, userId, action, details);
     }
 }
-

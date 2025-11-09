@@ -147,4 +147,3 @@ public class MetricsService {
         return Collections.unmodifiableMap(new HashMap<>(opCount));
     }
 }
-

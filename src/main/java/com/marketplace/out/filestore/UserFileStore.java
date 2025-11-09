@@ -71,4 +71,3 @@ public class UserFileStore implements UserRepository {
         return new ArrayList<>(users.values());
     }
 }
-

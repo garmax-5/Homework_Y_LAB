@@ -117,7 +117,6 @@ public class AuthService {
         }
     }
 
-
     public User getCurrentUser() {
         return currentUser;
     }

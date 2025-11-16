@@ -1,36 +1,55 @@
 package com.marketplace.in;
 
+import com.marketplace.config.DatabaseConnection;
+import com.marketplace.config.LiquibaseRunner;
 import com.marketplace.model.Product;
 import com.marketplace.model.User;
-import com.marketplace.out.filestore.ProductFileStore;
-import com.marketplace.out.filestore.UserFileStore;
-import com.marketplace.out.repository.ProductRepositoryImpl;
-import com.marketplace.out.repository.UserRepositoryImpl;
+import com.marketplace.out.repository.*;
 import com.marketplace.service.*;
 import com.marketplace.validation.ProductValidator;
 import com.marketplace.validation.UserValidator;
 
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.Scanner;
 
 public class ConsoleApp {
+    private final Connection connection;
+    private final ProductRepository productRepository;
+    private final ProductService productService;
+    private final UserRepository userRepository;
+    private final AuthService authService;
+    private final AuditRepository auditRepository;
+    private final AuditService auditService;
 
     private final Scanner scanner = new Scanner(System.in);
-    private final AuditService auditService = new AuditService();
     private final MetricsService metricsService = new MetricsService();
     private final ConsolePrinter printer = new ConsolePrinterImpl();
 
-//    private final UserRepositoryImpl userRepository = new UserRepositoryImpl();
-//    private final ProductRepositoryImpl productRepository = new ProductRepositoryImpl();
+    private final UserValidator userValidator;
+    private final ProductValidator productValidator;
 
-    private final UserFileStore userRepository = new UserFileStore("src/main/resources/data/users.txt");
-    private final ProductFileStore productRepository = new ProductFileStore("src/main/resources/data/products.txt");
+    public ConsoleApp() {
+        try {
+            this.connection = DatabaseConnection.getConnection();
+        } catch (SQLException e) {
+            throw new RuntimeException("Ошибка подключения к базе данных", e);
+        }
 
-    private final UserValidator userValidator = new UserValidator(auditService);
-    private final ProductValidator productValidator = new ProductValidator(auditService);
+        this.auditRepository = new AuditRepositoryImpl(connection);
+        this.auditService = new AuditService(auditRepository);
 
-    private final AuthService authService = new AuthService(userRepository, auditService, metricsService, userValidator);
-    private final ProductService productService = new ProductService(productRepository, auditService, authService, metricsService, productValidator);
+        this.userValidator = new UserValidator(auditService);
+        this.productValidator = new ProductValidator(auditService);
+
+        this.userRepository = new UserRepositoryImpl(connection);
+        this.productRepository = new ProductRepositoryImpl(connection);
+
+        this.authService = new AuthService(userRepository, auditService, metricsService, userValidator);
+        this.productService = new ProductService(productRepository, auditService, authService, metricsService, productValidator);
+    }
 
     public void start() {
         printer.printMessage("=== Marketplace Product Catalog ===");
@@ -71,12 +90,16 @@ public class ConsoleApp {
                         "5. Найти товары по диапазону цен"
         );
         if (authService.isAdmin()) {
-            printer.printMessage("6. Добавить или обновить товар\n7. Удалить товар");
+            printer.printMessage(
+                    "6. Создать новый товар\n" +
+                            "7. Обновить существующий товар\n" +
+                            "8. Удалить товар"
+            );
         }
         printer.printMessage(
-                "8. Показать журнал аудита\n" +
-                        "9. Показать метрики\n" +
-                        "10. Выйти из аккаунта\n" +
+                "9. Показать журнал аудита\n" +
+                        "10. Показать метрики\n" +
+                        "11. Выйти из аккаунта\n" +
                         "0. Завершить программу"
         );
         printer.printMessage("Выберите действие: ");
@@ -88,11 +111,12 @@ public class ConsoleApp {
             case "3": findByBrand(); break;
             case "4": findByCategory(); break;
             case "5": findByPriceRange(); break;
-            case "6": if (authService.isAdmin()) addOrUpdateProduct(); else printer.printMessage("Доступ запрещен."); break;
-            case "7": if (authService.isAdmin()) deleteProduct(); else printer.printMessage("Доступ запрещен."); break;
-            case "8": showAuditLog(); break;
-            case "9": printer.printMetrics(metricsService); break;
-            case "10": authService.logout(); break;
+            case "6": if (authService.isAdmin()) createProduct(); else printer.printMessage("Доступ запрещен."); break;
+            case "7": if (authService.isAdmin()) updateProduct(); else printer.printMessage("Доступ запрещен."); break;
+            case "8": if (authService.isAdmin()) deleteProduct(); else printer.printMessage("Доступ запрещен."); break;
+            case "9": showAuditLog(); break;
+            case "10": printer.printMetrics(metricsService); break;
+            case "11": authService.logout(); break;
             case "0": return true;
             default: printer.printMessage("Некорректный выбор.");
         }
@@ -114,22 +138,12 @@ public class ConsoleApp {
 
 
     private void register() {
-        long id;
-        while (true) {
-            id = readLong("Введите ID пользователя (число): ");
-            if (userRepository.existsById(id)) {
-                printer.printMessage("Ошибка: пользователь с таким ID уже существует. Попробуйте другой ID.");
-            } else {
-                break;
-            }
-        }
-
         String username = readNonEmptyString("Введите имя пользователя: ", 30);
         String password = readNonEmptyString("Введите пароль: ", 30);
         User.Role role = readRole();
 
         try {
-            authService.register(new User(id, username, password, role));
+            authService.register(new User(username, password, role));
             printer.printMessage("Регистрация успешна!");
         } catch (IllegalArgumentException e) {
             printer.printMessage("Ошибка: " + e.getMessage());
@@ -175,34 +189,45 @@ public class ConsoleApp {
         printer.printProducts(productService.findByPriceRange(min, max));
     }
 
-    private void addOrUpdateProduct() {
-        while (true) {
-            try {
-                long id = readLong("Введите ID товара: ");
-                String name = readNonEmptyString("Название: ", 50);
-                String brand = readNonEmptyString("Бренд: ", 50);
-                String category = readNonEmptyString("Категория: ", 50);
-                double price = readDouble("Цена: ");
+    // Создание нового товара
+    private void createProduct() {
+        try {
+            String name = readNonEmptyString("Название: ", 50);
+            String brand = readNonEmptyString("Бренд: ", 50);
+            String category = readNonEmptyString("Категория: ", 50);
+            double price = readDouble("Цена: ");
 
-                Product product = new Product(id, name, brand, category, price);
+            Product product = new Product(name, brand, category, price);
+            Product saved = productService.save(product);
 
-                if (productService.findById(id).isPresent()) {
-                    productService.update(product);
-                    printer.printMessage("Товар успешно обновлён.");
-                } else {
-                    productService.save(product);
-                    printer.printMessage("Товар успешно создан.");
-                }
+            printer.printMessage("Товар успешно создан с ID=" + saved.getId());
+        } catch (IllegalArgumentException | SecurityException e) {
+            printer.printMessage("Ошибка: " + e.getMessage());
+        }
+    }
 
-                break;
-
-            } catch (IllegalArgumentException e) {
-                printer.printMessage("Ошибка: " + e.getMessage());
-                printer.printMessage("Попробуйте снова.\n");
-            } catch (SecurityException e) {
-                printer.printMessage("Ошибка доступа: " + e.getMessage());
-                break;
+    // Обновление существующего товара
+    private void updateProduct() {
+        try {
+            long id = readLong("Введите ID существующего товара: ");
+            Optional<Product> existingOpt = productService.findById(id);
+            if (existingOpt.isEmpty()) {
+                printer.printMessage("Товар с указанным ID не найден.");
+                return;
             }
+
+            Product existing = existingOpt.get();
+            String name = readNonEmptyString("Название [" + existing.getName() + "]: ", 50);
+            String brand = readNonEmptyString("Бренд [" + existing.getBrand() + "]: ", 50);
+            String category = readNonEmptyString("Категория [" + existing.getCategory() + "]: ", 50);
+            double price = readDouble("Цена [" + existing.getPrice() + "]: ");
+
+            Product updated = new Product(existing.getId(), name, brand, category, price, existing.getCreatedAt(), Instant.now());
+            productService.update(updated);
+
+            printer.printMessage("Товар успешно обновлён.");
+        } catch (IllegalArgumentException | SecurityException e) {
+            printer.printMessage("Ошибка: " + e.getMessage());
         }
     }
 
@@ -275,6 +300,7 @@ public class ConsoleApp {
     }
 
     public static void main(String[] args) {
+        LiquibaseRunner.run();
         new ConsoleApp().start();
     }
 }

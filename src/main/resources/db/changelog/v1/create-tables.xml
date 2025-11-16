@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="
+       http://www.liquibase.org/xml/ns/dbchangelog
+       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- 001: Создание схем -->
+    <changeSet id="001-create-schemas" author="maxim">
+        <sql>CREATE SCHEMA IF NOT EXISTS auth;</sql>
+        <sql>CREATE SCHEMA IF NOT EXISTS catalog;</sql>
+        <sql>CREATE SCHEMA IF NOT EXISTS audit;</sql>
+    </changeSet>
+
+    <!-- 002: Создание sequence -->
+    <changeSet id="002-create-sequences" author="maxim">
+        <sql>CREATE SEQUENCE IF NOT EXISTS auth.users_id_seq START WITH 1 INCREMENT BY 1;</sql>
+        <sql>CREATE SEQUENCE IF NOT EXISTS catalog.products_id_seq START WITH 1 INCREMENT BY 1;</sql>
+        <sql>CREATE SEQUENCE IF NOT EXISTS audit.audit_events_id_seq START WITH 1 INCREMENT BY 1;</sql>
+    </changeSet>
+
+    <!-- 003: Таблица пользователей -->
+    <changeSet id="003-create-users-table" author="maxim">
+        <createTable tableName="users" schemaName="auth">
+            <column name="id" type="bigint" defaultValueComputed="nextval('auth.users_id_seq'::regclass)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="username" type="varchar(100)">
+                <constraints nullable="false" unique="true"/>
+            </column>
+            <column name="password" type="varchar(255)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="role" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+    <!-- 004: Таблица продуктов -->
+    <changeSet id="004-create-products-table" author="maxim">
+        <createTable tableName="products" schemaName="catalog">
+            <column name="id" type="bigint" defaultValueComputed="nextval('catalog.products_id_seq'::regclass)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="name" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="brand" type="varchar(100)"/>
+            <column name="category" type="varchar(100)"/>
+            <column name="price" type="numeric(12,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="created_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP"/>
+            <column name="updated_at" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP"/>
+        </createTable>
+    </changeSet>
+
+    <!-- 005: Таблица аудита -->
+    <changeSet id="005-create-audit-table" author="maxim">
+        <createTable tableName="audit_events" schemaName="audit">
+            <column name="id" type="bigint" defaultValueComputed="nextval('audit.audit_events_id_seq'::regclass)">
+                <constraints primaryKey="true" nullable="false"/>
+            </column>
+            <column name="timestamp" type="timestamp" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="user_id" type="bigint"/>
+            <column name="action" type="varchar(200)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="details" type="text"/>
+            <column name="level" type="varchar(20)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+    </changeSet>
+
+</databaseChangeLog>

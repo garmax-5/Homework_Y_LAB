@@ -12,8 +12,7 @@ import java.util.Optional;
  * Реализует бизнес-логику CRUD-операций и методы фильтрации товаров по различным критериям.
  * <p>
  * Взаимодействует с {@link ProductRepository}, проводит валидацию данных через {@link ProductValidator},
- * а также выполняет аудит действий и обновление метрик.
- *
+ * выполняет аудит действий пользователей и обновляет метрики через {@link MetricsService}.
  */
 public class ProductService {
     private final ProductRepository repository;
@@ -31,7 +30,8 @@ public class ProductService {
      * @param metricsService сервис для сбора и обновления метрик
      * @param validator      валидатор для проверки корректности данных о товаре
      */
-    public ProductService(ProductRepository repository, AuditService auditService, AuthService authService, MetricsService metricsService, ProductValidator validator) {
+    public ProductService(ProductRepository repository, AuditService auditService, AuthService authService,
+                          MetricsService metricsService, ProductValidator validator) {
         this.repository = repository;
         this.auditService = auditService;
         this.authService = authService;
@@ -41,29 +41,27 @@ public class ProductService {
 
     /**
      * Сохраняет новый продукт в хранилище.
+     * <p>
      * Доступно только пользователю с ролью ADMIN.
      *
-     * @param product продукт, который нужно сохранить
-     * @return сохранённый продукт
-     * @throws SecurityException        если пользователь не имеет прав администратора
-     * @throws IllegalArgumentException если продукт уже существует или не прошёл валидацию
+     * @param product продукт для сохранения
+     * @return сохранённый продукт с назначенным идентификатором
+     * @throws SecurityException        если текущий пользователь не имеет прав администратора
+     * @throws IllegalArgumentException если продукт уже существует (id != null) или не прошёл валидацию
      */
     public Product save(Product product) {
         requireAdmin();
-        Long userId = authService.getCurrentUser() != null ? authService.getCurrentUser().getId() : null;
+        Long userId = currentUserId();
         validator.validate(product, userId);
 
-        if (repository.findById(product.getId()).isPresent()) {
-            auditService.logError(userId,
-                    "DUPLICATE_PRODUCT_ID",
-                    "Product with id=" + product.getId() + " already exists");
-            throw new IllegalArgumentException("Продукт с ID " + product.getId() + " уже существует");
+        if (product.getId() != null) {
+            auditService.logError(userId, "SAVE_FAILED", "Use update() for existing products");
+            throw new IllegalArgumentException("Для создания товара не указывайте ID (id должен быть 0)");
         }
 
         Product saved = repository.save(product);
-        auditService.logInfo(userId,
-                "ADD_PRODUCT",
-                "Added product id=" + product.getId() + " name=" + product.getName());
+
+        auditService.logInfo(userId, "ADD_PRODUCT", "Added product id=" + saved.getId() + " name=" + saved.getName());
         metricsService.increment("product.added");
         metricsService.setGauge("product.count", repository.count());
 
@@ -72,47 +70,43 @@ public class ProductService {
 
     /**
      * Обновляет существующий продукт.
+     * <p>
+     * Доступно только пользователю с ролью ADMIN.
      *
      * @param product изменённые данные продукта
-     * @return обновлённый продукт
-     * @throws SecurityException        если пользователь не является администратором
-     * @throws IllegalArgumentException если продукт не найден или не прошёл валидацию
+     * @return обновлённый продукт с актуальными данными из базы
+     * @throws SecurityException        если текущий пользователь не является администратором
+     * @throws IllegalArgumentException если продукт не найден по ID или не прошёл валидацию
+     * @throws RuntimeException         если обновление в базе данных завершилось неудачно
      */
     public Product update(Product product) {
         requireAdmin();
-        Long userId = authService.getCurrentUser() != null ? authService.getCurrentUser().getId() : null;
+        Long userId = currentUserId();
         validator.validate(product, userId);
 
-        Optional<Product> existingOpt = repository.findById(product.getId());
-        if (existingOpt.isEmpty()) {
-            auditService.logError(userId,
-                    "UPDATE_FAILED",
-                    "Product with id=" + product.getId() + " does not exist");
+        if (product.getId() == null || !repository.existsById(product.getId())) {
+            auditService.logError(userId, "UPDATE_FAILED", "Product id=" + product.getId() + " does not exist");
             throw new IllegalArgumentException("Продукт с ID " + product.getId() + " не найден");
         }
 
-        Product existing = existingOpt.get();
-        existing.setName(product.getName());
-        existing.setBrand(product.getBrand());
-        existing.setCategory(product.getCategory());
-        existing.setPrice(product.getPrice());
+        boolean ok = repository.update(product);
+        if (!ok) {
+            auditService.logError(userId, "UPDATE_FAILED", "DB update returned false for id=" + product.getId());
+            throw new RuntimeException("Не удалось обновить продукт");
+        }
 
-        Product saved = repository.save(existing);
-
-        auditService.logInfo(userId,
-                "UPDATE_PRODUCT",
-                "Updated product id=" + product.getId() + " name=" + product.getName());
+        auditService.logInfo(userId, "UPDATE_PRODUCT", "Updated product id=" + product.getId() + " name=" + product.getName());
         metricsService.increment("product.updated");
         metricsService.setGauge("product.count", repository.count());
 
-        return saved;
+        return repository.findById(product.getId()).orElse(product);
     }
 
     /**
      * Возвращает продукт по его идентификатору.
      *
      * @param id идентификатор продукта
-     * @return {@link Optional}, содержащий продукт, если он найден
+     * @return {@link Optional}, содержащий продукт, если он найден; пустой Optional в противном случае
      */
     public Optional<Product> findById(long id) {
         return repository.findById(id);
@@ -120,6 +114,7 @@ public class ProductService {
 
     /**
      * Удаляет продукт по его идентификатору.
+     * <p>
      * Доступно только пользователям с ролью ADMIN.
      *
      * @param id идентификатор продукта
@@ -128,19 +123,15 @@ public class ProductService {
      */
     public boolean deleteById(long id) {
         requireAdmin();
+        Long userId = currentUserId();
+
         boolean deleted = repository.deleteById(id);
         if (deleted) {
-            auditService.logInfo(authService.getCurrentUser().getId(),
-                    "DELETE_PRODUCT",
-                    "Product id=" + id);
-
-            // Метрики
+            auditService.logInfo(userId, "DELETE_PRODUCT", "Product id=" + id);
             metricsService.increment("product.deleted");
             metricsService.setGauge("product.count", repository.count());
         } else {
-            auditService.logError(authService.getCurrentUser().getId(),
-                    "DELETE_PRODUCT_FAILED",
-                    "Attempted to delete non-existing product id=" + id);
+            auditService.logError(userId, "DELETE_PRODUCT_FAILED", "Attempted to delete non-existing product id=" + id);
         }
         return deleted;
     }
@@ -148,76 +139,66 @@ public class ProductService {
     /**
      * Возвращает список всех продуктов.
      *
-     * @return список всех продуктов из хранилища
+     * @return список всех продуктов в базе
      */
     public List<Product> findAll() {
         return repository.findAll();
     }
 
     /**
-     * Возвращает список продуктов, соответствующих заданному бренду.
+     * Возвращает список продуктов указанного бренда.
      *
      * @param brand название бренда
-     * @return список продуктов указанного бренда
+     * @return список продуктов указанного бренда; пустой список, если совпадений нет
      */
     public List<Product> findByBrand(String brand) {
         long start = metricsService.startTimer();
-
         List<Product> result = repository.findByBrand(brand);
-
         metricsService.stopTimer("findByBrand", start);
-        auditService.logInfo(authService.getCurrentUser().getId(),
-                "FILTER_PRODUCTS", "Filter by brand=" + brand);
+
+        auditService.logInfo(currentUserId(), "FILTER_PRODUCTS", "Filter by brand=" + brand);
         return result;
     }
 
     /**
-     * Возвращает список продуктов, принадлежащих указанной категории.
+     * Возвращает список продуктов указанной категории.
      *
      * @param category категория продукта
-     * @return список продуктов указанной категории
+     * @return список продуктов указанной категории; пустой список, если совпадений нет
      */
     public List<Product> findByCategory(String category) {
         long start = metricsService.startTimer();
-
         List<Product> result = repository.findByCategory(category);
-
         metricsService.stopTimer("findByCategory", start);
-        auditService.logInfo(authService.getCurrentUser().getId(),
-                "FILTER_PRODUCTS", "Filter by category=" + category);
+
+        auditService.logInfo(currentUserId(), "FILTER_PRODUCTS", "Filter by category=" + category);
         return result;
     }
 
     /**
-     * Возвращает список продуктов, находящихся в указанном диапазоне цен.
+     * Возвращает список продуктов, цена которых находится в указанном диапазоне.
      *
      * @param min минимальная цена
      * @param max максимальная цена
-     * @return список продуктов, цена которых находится в указанном диапазоне
+     * @return список продуктов с ценой в диапазоне [min, max]; пустой список, если совпадений нет
      * @throws IllegalArgumentException если минимальная цена больше максимальной
      */
     public List<Product> findByPriceRange(double min, double max) {
-        // Проверка диапазона
         if (min > max) {
-            auditService.logError(authService.getCurrentUser().getId(),
-                    "INVALID_PRICE_RANGE",
-                    "Invalid price range [" + min + ", " + max + "]");
+            auditService.logError(currentUserId(), "INVALID_PRICE_RANGE", "Invalid price range [" + min + ", " + max + "]");
             throw new IllegalArgumentException("Минимальная цена не может быть больше максимальной");
         }
 
         long start = metricsService.startTimer();
-
         List<Product> result = repository.findByPriceRange(min, max);
-
         metricsService.stopTimer("findByPriceRange", start);
-        auditService.logInfo(authService.getCurrentUser().getId(),
-                "FILTER_PRODUCTS", "Filter by price range=[" + min + ", " + max + "]");
 
+        auditService.logInfo(currentUserId(), "FILTER_PRODUCTS", "Filter by price range=[" + min + ", " + max + "]");
         return result;
     }
 
     /**
-     * Возвращает общее количество продуктов.
+     * Возвращает общее количество продуктов в базе.
      *
      * @return количество всех продуктов
      */
@@ -234,9 +215,18 @@ public class ProductService {
      */
     private void requireAdmin() {
         if (!authService.isAdmin()) {
-            Long userId = authService.getCurrentUser() != null ? authService.getCurrentUser().getId() : null;
+            Long userId = currentUserId();
             auditService.logError(userId, "ACCESS_DENIED", "Admin role required");
             throw new SecurityException("Доступ запрещен: требуется роль ADMIN");
         }
+    }
+
+    /**
+     * Возвращает идентификатор текущего пользователя.
+     *
+     * @return ID текущего пользователя или {@code null}, если пользователь не аутентифицирован
+     */
+    private Long currentUserId() {
+        return authService.getCurrentUser() != null ? authService.getCurrentUser().getId() : null;
     }
 }

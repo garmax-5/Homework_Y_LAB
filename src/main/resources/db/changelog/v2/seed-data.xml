@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+        xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:schemaLocation="
+       http://www.liquibase.org/xml/ns/dbchangelog
+       http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-latest.xsd">
+
+    <!-- 101: Seed пользователей -->
+    <changeSet id="101-seed-users" author="maxim" context="seed">
+        <insert tableName="users" schemaName="auth">
+            <column name="id" valueNumeric="1"/>
+            <column name="username" value="admin"/>
+            <column name="password" value="admin123"/>
+            <column name="role" value="ADMIN"/>
+        </insert>
+        <insert tableName="users" schemaName="auth">
+            <column name="id" valueNumeric="2"/>
+            <column name="username" value="john"/>
+            <column name="password" value="johnpass"/>
+            <column name="role" value="USER"/>
+        </insert>
+        <insert tableName="users" schemaName="auth">
+            <column name="id" valueNumeric="3"/>
+            <column name="username" value="kate"/>
+            <column name="password" value="katepass"/>
+            <column name="role" value="USER"/>
+        </insert>
+    </changeSet>
+
+    <!-- 102: Seed продуктов -->
+    <changeSet id="102-seed-products" author="maxim" context="seed">
+        <insert tableName="products" schemaName="catalog">
+            <column name="id" valueNumeric="1"/>
+            <column name="name" value="iPhone 14"/>
+            <column name="brand" value="Apple"/>
+            <column name="category" value="Smartphone"/>
+            <column name="price" valueNumeric="899.99"/>
+            <column name="created_at" value="2024-01-10 10:00:00"/>
+            <column name="updated_at" value="2024-01-10 10:00:00"/>
+        </insert>
+        <insert tableName="products" schemaName="catalog">
+            <column name="id" valueNumeric="2"/>
+            <column name="name" value="Galaxy S23"/>
+            <column name="brand" value="Samsung"/>
+            <column name="category" value="Smartphone"/>
+            <column name="price" valueNumeric="799.99"/>
+            <column name="created_at" value="2024-01-12 11:20:00"/>
+            <column name="updated_at" value="2024-01-12 11:20:00"/>
+        </insert>
+        <insert tableName="products" schemaName="catalog">
+            <column name="id" valueNumeric="3"/>
+            <column name="name" value="MacBook Air M2"/>
+            <column name="brand" value="Apple"/>
+            <column name="category" value="Laptop"/>
+            <column name="price" valueNumeric="1299.99"/>
+            <column name="created_at" value="2024-02-01 09:00:00"/>
+            <column name="updated_at" value="2024-02-01 09:00:00"/>
+        </insert>
+        <insert tableName="products" schemaName="catalog">
+            <column name="id" valueNumeric="4"/>
+            <column name="name" value="ThinkPad X1 Carbon"/>
+            <column name="brand" value="Lenovo"/>
+            <column name="category" value="Laptop"/>
+            <column name="price" valueNumeric="1499.99"/>
+            <column name="created_at" value="2024-02-05 14:40:00"/>
+            <column name="updated_at" value="2024-02-05 14:40:00"/>
+        </insert>
+    </changeSet>
+
+    <!-- 103: Фиксируем sequence после seed -->
+    <changeSet id="103-fix-sequences" author="maxim">
+        <sql>SELECT setval('auth.users_id_seq', (SELECT MAX(id) FROM auth.users), true);</sql>
+        <sql>SELECT setval('catalog.products_id_seq', (SELECT MAX(id) FROM catalog.products), true);</sql>
+        <sql>SELECT setval('audit.audit_events_id_seq', (SELECT MAX(id) FROM audit.audit_events), true);</sql>
+    </changeSet>
+
+</databaseChangeLog>

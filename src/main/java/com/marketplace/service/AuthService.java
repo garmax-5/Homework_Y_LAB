@@ -10,7 +10,10 @@ import java.util.Optional;
  * Сервис аутентификации и авторизации пользователей.
  * <p>
  * Отвечает за регистрацию, вход, выход и проверку прав доступа пользователя.
- * Также интегрируется с системами аудита и метрик для фиксации действий и производительности.
+ * Также интегрируется с системами аудита ({@link AuditService}) и метрик ({@link MetricsService})
+ * для фиксации действий и мониторинга производительности.
+ * <p>
+ * Поддерживает хранение текущего активного пользователя в контексте {@code currentUser}.
  */
 public class AuthService {
     private final UserRepository userRepository;
@@ -37,34 +40,30 @@ public class AuthService {
     /**
      * Регистрирует нового пользователя в системе.
      * <p>
-     * Выполняет проверку корректности данных и уникальности идентификатора и имени пользователя.
-     * В случае успеха - сохраняет нового пользователя в репозитории.
+     * Выполняет валидацию данных пользователя через {@link UserValidator}, проверяет уникальность имени пользователя
+     * и отсутствие заранее указанного ID.
+     * В случае успеха сохраняет пользователя в {@link UserRepository} и фиксирует событие в системе аудита и метрик.
      *
      * @param user объект пользователя для регистрации
-     * @throws IllegalArgumentException если пользователь с таким ID или именем уже существует
+     * @throws IllegalArgumentException если пользователь уже существует по имени или указан ID
      */
     public void register(User user) {
         long start = metricsService.startTimer();
         try {
             validator.validate(user);
 
-            // Проверка уникальности ID
-            if (userRepository.existsById(user.getId())) {
-                auditService.logError(user.getId(), "REGISTER_FAILED", "User ID already exists");
-                metricsService.increment("register.failed");
-                throw new IllegalArgumentException("Пользователь с таким ID уже существует");
+            if (user.getId() != null) {
+                throw new IllegalArgumentException("При регистрации не указывайте ID");
             }
 
-            // Проверка уникальности username
             if (userRepository.findByUserName(user.getUserName()).isPresent()) {
-                auditService.logError(user.getId(), "REGISTER_FAILED", "Username already exists");
+                auditService.logError(null, "REGISTER_FAILED", "Username already exists");
                 metricsService.increment("register.failed");
                 throw new IllegalArgumentException("Пользователь с таким именем уже существует");
             }
 
-            // Сохраняем пользователя
-            userRepository.save(user);
-            auditService.logInfo(user.getId(), "REGISTER", "User successfully registered");
+            User saved = userRepository.save(user);
+            auditService.logInfo(saved.getId(), "REGISTER", "User successfully registered");
             metricsService.increment("register.success");
 
         } finally {
@@ -72,14 +71,14 @@ public class AuthService {
         }
     }
 
-
     /**
-     * Выполняет вход пользователя по имени и паролю.
+     * Выполняет вход пользователя в систему.
      * <p>
-     * При успешной аутентификации сохраняет текущего пользователя в контексте {@code currentUser}.
+     * Проверяет соответствие имени пользователя и пароля с данными из {@link UserRepository}.
+     * При успешной аутентификации сохраняет пользователя в контексте {@code currentUser}.
      *
      * @param userName имя пользователя
-     * @param password пароль
+     * @param password пароль пользователя
      * @throws IllegalArgumentException если имя пользователя или пароль неверные
      */
     public void login(String userName, String password) {
@@ -102,6 +101,8 @@ public class AuthService {
 
     /**
      * Выполняет выход текущего пользователя из системы.
+     * <p>
+     * Сбрасывает {@code currentUser} и фиксирует событие в системе аудита и метрик.
      *
      * @throws IllegalStateException если попытка выхода совершается без активного пользователя
      */
@@ -117,14 +118,29 @@ public class AuthService {
         }
     }
 
+    /**
+     * Возвращает текущего аутентифицированного пользователя.
+     *
+     * @return текущий пользователь или {@code null}, если пользователь не аутентифицирован
+     */
     public User getCurrentUser() {
         return currentUser;
     }
 
+    /**
+     * Проверяет, обладает ли текущий пользователь правами администратора.
+     *
+     * @return {@code true}, если текущий пользователь имеет роль {@link User.Role#ADMIN}, иначе {@code false}
+     */
     public boolean isAdmin() {
         return currentUser != null && currentUser.getRole() == User.Role.ADMIN;
     }
 
+    /**
+     * Проверяет, аутентифицирован ли текущий пользователь.
+     *
+     * @return {@code true}, если пользователь вошёл в систему, иначе {@code false}
+     */
     public boolean isAuthenticated() {
         return currentUser != null;
     }
